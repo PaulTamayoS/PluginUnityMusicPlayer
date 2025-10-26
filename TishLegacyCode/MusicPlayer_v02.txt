@@ -1,0 +1,145 @@
+package com.Games4Science.PluginUnityMusicPlayer;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.media.MediaPlayer;
+import android.net.Uri;
+import android.util.Log;
+
+import com.unity3d.player.UnityPlayer; // This one works even in IL2CPP — it's a native bridge
+
+public class MusicPlayer
+{
+    private Context context;
+    private MediaPlayer mediaPlayer;
+
+    private static final int REQUEST_CODE_PICK_AUDIO = 1001; // Can be any number starting from 1001. Just remember making a different one for each different Intent
+    private static String lastPickedUri = null; // Unity can retrieve this
+
+
+    // Constructor: Unity will pass the Android context
+    public MusicPlayer(Context context)
+    {
+        this.context = context;
+    }
+
+
+
+    public void Play(String path)
+    {
+        Stop(); // stop current playback if any
+
+        Uri uri;
+        if (path.startsWith("content://") || path.startsWith("file://"))
+        {
+            uri = Uri.parse(path);
+        }
+        else
+        {
+            uri = Uri.parse("file://" + path); // legacy file path
+        }
+
+        mediaPlayer = MediaPlayer.create(context, uri);
+        if (mediaPlayer != null)
+        {
+            mediaPlayer.start();
+            Log.d("MusicPlayer", "Playing: " + path);
+        }
+        else
+        {
+            Log.e("MusicPlayer", "Failed to create MediaPlayer for: " + path);
+        }
+    }
+
+    public static void Pause()
+    {
+        if (mediaPlayer != null && mediaPlayer.isPlaying())
+        {
+            mediaPlayer.pause();
+        }
+    }
+
+    public static void Resume()
+    {
+        if (mediaPlayer != null && mediaPlayer.isPlaying() == false)
+        {
+            mediaPlayer.start();
+        }
+    }
+
+    public static void Stop()
+    {
+        if (mediaPlayer != null)
+        {
+            mediaPlayer.stop();
+            mediaPlayer.release();
+            mediaPlayer = null;
+        }
+    }
+
+    public boolean IsPlaying()
+    {
+        return mediaPlayer != null && mediaPlayer.isPlaying();
+    }
+
+    // -------------------
+    // SAF (Storage Access Framework) methods
+    // -------------------
+
+    /**
+     * Opens Android SAF native file picker to select an audio file.
+     */
+    public void PickAudioFile()
+    {
+        if (!(context instanceof Activity))
+        {
+            Log.e("MusicPlayer", "Context is not an Activity. Cannot launch file picker.");
+            return;
+        }
+
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("audio/*"); // only audio files
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        // Optionally allow multiple selection:
+        // intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+
+        ((Activity) context).startActivityForResult(intent, REQUEST_CODE_PICK_AUDIO);
+    }
+
+
+    /**
+     * Call this from your custom Activity's onActivityResult
+     */
+    public void onActivityResult(int requestCode, int resultCode, Intent data)
+    {
+        if (requestCode == REQUEST_CODE_PICK_AUDIO && resultCode == Activity.RESULT_OK)
+        {
+            if (data != null)
+            {
+                Uri uri = data.getData();
+                if (uri != null)
+                {
+                    Log.d("MusicPlayer", "Picked file: " + uri.toString());
+                    context.getContentResolver().takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    );
+                    lastPickedUri = uri.toString();
+                }
+            }
+        }
+    }
+
+    // Unity can poll this to get the last picked file
+    public String GetLastPickedUri()
+    {
+        Log.d("MusicPlayer", "Returning lastPickedUri: " + lastPickedUri);
+        return lastPickedUri;
+    }
+
+    public void ClearLastPickedUri()
+    {
+        lastPickedUri = null;
+    }
+}

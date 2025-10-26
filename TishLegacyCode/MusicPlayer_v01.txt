@@ -1,0 +1,58 @@
+package com.Games4Science.PluginUnityMusicPlayer;
+
+import android.content.Context;
+import android.media.MediaPlayer;
+import android.net.Uri;
+
+public class MusicPlayer
+{
+    private MediaPlayer mediaPlayer;
+    private Context context;
+
+    // Constructor: Unity will pass the Android context
+    public MusicPlayer(Context context)
+    {
+        this.context = context;
+    }
+
+    public void Play(String path)
+    {
+        Stop(); // stop current playback if any
+        Uri uri = Uri.parse(path);
+        mediaPlayer = MediaPlayer.create(context, uri);
+        if (mediaPlayer != null)
+        {
+            mediaPlayer.start();
+        }
+    }
+
+    public void Pause()
+    {
+        if (mediaPlayer != null && mediaPlayer.isPlaying())
+        {
+            mediaPlayer.pause();
+        }
+    }
+
+    public void Resume()
+    {
+        if (mediaPlayer != null)
+        {
+            mediaPlayer.start();
+        }
+    }
+
+    public void Stop()
+    {
+        if (mediaPlayer != null)
+        {
+            mediaPlayer.release();
+            mediaPlayer = null;
+        }
+    }
+
+    public boolean IsPlaying()
+    {
+        return mediaPlayer != null && mediaPlayer.isPlaying();
+    }
+}

@@ -1,0 +1,258 @@
+//There are two java classes, each one must be in its own file
+
+package com.Games4Science.PluginUnityMusicPlayer;
+
+import android.app.Activity;
+import android.content.ClipData;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.util.Log;
+
+import com.unity3d.player.UnityPlayer;
+
+import org.json.JSONArray;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.util.ArrayList;
+import java.util.List;
+
+public class AudioPickerProxyActivity extends Activity
+{
+    private static final String TAG = "[aar AUDIOPICKERPROXY]";
+    private static final int REQUEST_CODE_PICK_AUDIO = 12345;
+    private static final String CACHE_FILE = "last_picked_uris.json";
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState)
+    {
+        super.onCreate(savedInstanceState);
+
+        boolean allowMultiple = getIntent().getBooleanExtra("allowMultiple", false);
+
+        // Create the Intent to pick audio files
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("audio/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple);
+
+        try
+        {
+            startActivityForResult(intent, REQUEST_CODE_PICK_AUDIO);
+            Log.e(TAG, "File picker started (allowMultiple=" + allowMultiple + ")");
+        }
+        catch (Exception e)
+        {
+            Log.e(TAG, "Failed to launch file picker: " + e.getMessage());
+            finish();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data)
+    {
+        Log.e(TAG, "Calling super.onActivityResult(requestCode, resultCode, data)");
+        super.onActivityResult(requestCode, resultCode, data);
+        Log.e(TAG, "Done with super.onActivityResult(requestCode, resultCode, data)");
+
+        List<String> pickedUris = new ArrayList<>();
+
+        if (requestCode == REQUEST_CODE_PICK_AUDIO && resultCode == RESULT_OK && data != null)
+        {
+            ClipData clipData = data.getClipData();
+
+            if (clipData != null)
+            {
+                // Multiple files selected
+                for (int i = 0; i < clipData.getItemCount(); i++)
+                {
+                    Uri uri = clipData.getItemAt(i).getUri();
+
+                    if (uri != null)
+                    {
+                        pickedUris.add(uri.toString());
+                    }
+                }
+            }
+            else if (data.getData() != null)
+            {
+                // Single file selected
+                pickedUris.add(data.getData().toString());
+            }
+        }
+
+        // Save to cache file
+        saveUrisToCache(pickedUris);
+
+        // Notify Unity that files are ready (but not send full data yet)
+        UnityPlayer.UnitySendMessage("MusicManager", "OnFilePicked", "FILES_READY");
+
+        // Close the proxy activity
+        finish();
+    }
+
+    private void saveUrisToCache(List<String> uris)
+    {
+        try
+        {
+            JSONArray jsonArray = new JSONArray(uris);
+            File cacheFile = new File(getCacheDir(), CACHE_FILE);
+
+            try (FileWriter writer = new FileWriter(cacheFile, false))
+            {
+                writer.write(jsonArray.toString());
+                writer.flush();
+            }
+
+            Log.d(TAG, "Saved " + uris.size() + " URIs to cache: " + cacheFile.getAbsolutePath());
+        }
+        catch (Exception e)
+        {
+            Log.e(TAG, "Failed to save URIs to cache: " + e.getMessage());
+        }
+    }
+
+    public static File getCacheFile(Activity context)
+    {
+        return new File(context.getCacheDir(), CACHE_FILE);
+    }
+}
+
+
+
+
+package com.Games4Science.PluginUnityMusicPlayer;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.media.MediaPlayer;
+import android.net.Uri;
+import android.util.Log;
+
+import com.unity3d.player.UnityPlayer;
+import org.json.JSONArray;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.util.ArrayList;
+import java.util.List;
+
+public class MusicPlayer
+{
+    private static final String TAG = "[aar MUSICPLAYER]";
+    private static MediaPlayer mediaPlayer;
+
+    // --- MEDIA CONTROLS ---
+    public static void Play(String path) //This method is called by my Unity's MusicManager
+    {
+        Stop();
+        try {
+            Activity activity = UnityPlayer.currentActivity;
+            if (activity == null)
+            {
+                Log.e(TAG, "Play() failed: Unity activity is null!");
+                return;
+            }
+
+            Uri uri = path.startsWith("content://") || path.startsWith("file://")
+                    ? Uri.parse(path)
+                    : Uri.parse("file://" + path);
+
+            mediaPlayer = MediaPlayer.create(activity, uri);
+            if (mediaPlayer != null) {
+                mediaPlayer.start();
+                Log.e(TAG, "Playing: " + path);
+            } else {
+                Log.e(TAG, "Failed to create MediaPlayer for: " + path);
+            }
+        }
+        catch (Exception e)
+        {
+            Log.e(TAG, "Play error: " + e.getMessage());
+        }
+    }
+
+    public static void Pause() //This method is called by my Unity's MusicManager
+    {
+        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+            mediaPlayer.pause();
+            Log.e(TAG, "Playback paused");
+        }
+    }
+
+    public static void Resume() //This method is called by my Unity's MusicManager
+    {
+        if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
+            mediaPlayer.start();
+            Log.e(TAG, "Playback resumed");
+        }
+    }
+
+    public static void Stop() //This method is called by my Unity's MusicManager
+    {
+        if (mediaPlayer != null) {
+            try { mediaPlayer.stop(); } catch (Exception ignored) {}
+            mediaPlayer.release();
+            mediaPlayer = null;
+            Log.e(TAG, "Playback stopped and released");
+        }
+    }
+
+    // --- AUDIO PICKER ---
+    public static void PickAudioFile(boolean allowMultiple) //This method is called by my Unity's MusicManager
+    {
+        Activity activity = UnityPlayer.currentActivity;
+        if (activity == null) {
+            Log.e(TAG, "Unity activity is null, cannot launch file picker.");
+            return;
+        }
+
+        try {
+            Intent intent = new Intent(activity, AudioPickerProxyActivity.class);
+            intent.putExtra("allowMultiple", allowMultiple);
+            activity.startActivity(intent); // proxy handles result
+            Log.e(TAG, "AudioPickerProxyActivity launched (allowMultiple=" + allowMultiple + ")");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to launch AudioPickerProxyActivity: " + e.getMessage());
+        }
+    }
+
+    // --- DATA ACCESSORS ---
+    public static List<String> GetStoredUris(Activity context) //This method is called by my Unity's MusicManager
+    {
+        List<String> result = new ArrayList<>();
+
+        try
+        {
+            File cacheFile = new File(context.getCacheDir(), "last_picked_uris.json");
+            if (!cacheFile.exists()) {
+                Log.w(TAG, "No cached URI file found.");
+                return result;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new FileReader(cacheFile))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+            }
+
+            JSONArray jsonArray = new JSONArray(sb.toString());
+            for (int i = 0; i < jsonArray.length(); i++) {
+                result.add(jsonArray.getString(i));
+            }
+
+            Log.d(TAG, "Loaded " + result.size() + " URIs from cache.");
+        }
+        catch (Exception e)
+        {
+            Log.e(TAG, "Error reading cached URIs: " + e.getMessage());
+        }
+
+        return result;
+    }
+}

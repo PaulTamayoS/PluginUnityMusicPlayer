@@ -1,0 +1,147 @@
+package com.Games4Science.PluginUnityMusicPlayer;
+
+import android.app.Activity;
+import android.content.ClipData;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.util.Log;
+
+import com.unity3d.player.UnityPlayer;
+
+import org.json.JSONArray;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.util.ArrayList;
+import java.util.List;
+
+public class AudioPickerProxyActivity extends Activity
+{
+    private static final String TAG = "[aar AUDIOPICKERPROXY]";
+    private static final int REQUEST_CODE_PICK_AUDIO = 12345;
+    private static final String CACHE_FILE = "last_picked_uris.json";
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState)
+    {
+        super.onCreate(savedInstanceState);
+
+        boolean allowMultiple = getIntent().getBooleanExtra("allowMultiple", false);
+
+        // Create the Intent to pick audio files
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("audio/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple);
+
+        // This flag allows persistable access after user picks files
+        intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+
+        try
+        {
+            startActivityForResult(intent, REQUEST_CODE_PICK_AUDIO);
+            Log.d(TAG, "File picker started (allowMultiple=" + allowMultiple + ")");
+        }
+        catch (Exception e)
+        {
+            Log.e(TAG, "Failed to launch file picker: " + e.getMessage());
+            finish();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data)
+    {
+        Log.d(TAG, "Calling super.onActivityResult(requestCode, resultCode, data)");
+        super.onActivityResult(requestCode, resultCode, data);
+        Log.d(TAG, "Done with super.onActivityResult(requestCode, resultCode, data)");
+
+        List<String> pickedUris = new ArrayList<>();
+
+        if (requestCode == REQUEST_CODE_PICK_AUDIO && resultCode == RESULT_OK && data != null)
+        {
+            ClipData clipData = data.getClipData();
+
+            try
+            {
+                if (clipData != null)
+                {
+                    // Multiple files selected
+                    for (int i = 0; i < clipData.getItemCount(); i++)
+                    {
+                        Uri uri = clipData.getItemAt(i).getUri();
+                        if (uri != null)
+                        {
+                            persistUriPermission(uri);
+                            pickedUris.add(uri.toString());
+                        }
+                    }
+                }
+                else if (data.getData() != null)
+                {
+                    // Single file selected
+                    Uri uri = data.getData();
+                    persistUriPermission(uri);
+                    pickedUris.add(uri.toString());
+                }
+            }
+            catch (Exception e)
+            {
+                Log.e(TAG, "Error persisting URI permissions: " + e.getMessage());
+            }
+        }
+
+        // Save to cache file
+        saveUrisToCache(pickedUris);
+
+        // Notify Unity that files are ready (but not send full data yet)
+        UnityPlayer.UnitySendMessage("MusicManager", "OnFilePicked", "FILES_READY");
+
+        // Close the proxy activity
+        finish();
+    }
+
+    private void persistUriPermission(Uri uri)
+    {
+        try
+        {
+            final int takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+            getContentResolver().takePersistableUriPermission(uri, takeFlags);
+            Log.d(TAG, "Persisted URI permission for: " + uri);
+        }
+        catch (SecurityException e)
+        {
+            Log.w(TAG, "Could not persist permission for URI: " + uri + " — " + e.getMessage());
+        }
+    }
+
+    private void saveUrisToCache(List<String> uris)
+    {
+        try
+        {
+            JSONArray jsonArray = new JSONArray(uris);
+            File cacheFile = new File(getCacheDir(), CACHE_FILE);
+
+            try (FileWriter writer = new FileWriter(cacheFile, false))
+            {
+                writer.write(jsonArray.toString());
+                writer.flush();
+            }
+
+            Log.d(TAG, "Saved " + uris.size() + " URIs to cache: " + cacheFile.getAbsolutePath());
+        }
+        catch (Exception e)
+        {
+            Log.e(TAG, "Failed to save URIs to cache: " + e.getMessage());
+        }
+    }
+
+    public static File getCacheFile(Activity context)
+    {
+        return new File(context.getCacheDir(), CACHE_FILE);
+    }
+}
